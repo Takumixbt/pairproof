@@ -1,11 +1,35 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Callable
+import time
+from typing import Awaitable, Callable, TypeVar
 
 from croo import AgentClient, Config, Event, EventStream
 
 from .config import AgentConfig
+
+T = TypeVar("T")
+
+
+async def poll_until(
+    get_fn: Callable[[], Awaitable[T]],
+    predicate: Callable[[T], bool],
+    timeout: float,
+    interval: float = 3.0,
+) -> T:
+    """Repeatedly calls get_fn() until predicate(result) is true or timeout
+    elapses. Used for driving one-shot negotiations (Builder-as-requester,
+    test scripts) where polling is simpler and more robust than depending on
+    unconfirmed websocket event-field semantics.
+    """
+    deadline = time.monotonic() + timeout
+    while True:
+        value = await get_fn()
+        if predicate(value):
+            return value
+        if time.monotonic() >= deadline:
+            raise TimeoutError("timed out waiting for condition")
+        await asyncio.sleep(interval)
 
 
 def make_client(cfg: AgentConfig) -> AgentClient:

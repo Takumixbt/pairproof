@@ -10,33 +10,13 @@ the plan's "open items to resolve" note).
 
 from __future__ import annotations
 
-import asyncio
 import json
-import time
-from typing import Awaitable, Callable, TypeVar
 
 from croo import ListOptions, NegotiateOrderRequest, NegotiationStatus, Order, OrderStatus
 
-T = TypeVar("T")
+from common.cap_client import poll_until
 
-POLL_INTERVAL_SECONDS = 3.0
 DEFAULT_TIMEOUT_SECONDS = 600
-
-
-async def _poll_until(
-    get_fn: Callable[[], Awaitable[T]],
-    predicate: Callable[[T], bool],
-    timeout: float,
-    interval: float = POLL_INTERVAL_SECONDS,
-) -> T:
-    deadline = time.monotonic() + timeout
-    while True:
-        value = await get_fn()
-        if predicate(value):
-            return value
-        if time.monotonic() >= deadline:
-            raise TimeoutError("timed out waiting for condition")
-        await asyncio.sleep(interval)
 
 
 async def hire_verifier(
@@ -50,7 +30,7 @@ async def hire_verifier(
         NegotiateOrderRequest(service_id=verifier_service_id, requirements=requirements)
     )
 
-    accepted = await _poll_until(
+    accepted = await poll_until(
         lambda: client.get_negotiation(negotiation.negotiation_id),
         lambda n: n.status != NegotiationStatus.PENDING,
         timeout=timeout,
@@ -69,7 +49,7 @@ async def hire_verifier(
 
     await client.pay_order(order.order_id)
 
-    completed = await _poll_until(
+    completed = await poll_until(
         lambda: client.get_order(order.order_id),
         lambda o: o.status in (OrderStatus.COMPLETED, OrderStatus.REJECTED, OrderStatus.EXPIRED),
         timeout=timeout,
