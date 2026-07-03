@@ -15,8 +15,10 @@ Built and locally verified without live CAP credentials:
   insecure code samples — all three cases correctly detected.
 - `agent_verifier/provider.py` — CAP provider: accepts a code+test bundle,
   waits for payment, runs the Docker sandbox, delivers the report.
-- `agent_builder/codegen.py` — Claude Opus 4.8 call that turns a task spec
-  into a code+test bundle via structured JSON output.
+- `agent_builder/codegen.py` — turns a task spec into a code+test bundle via
+  structured JSON output. Defaults to a **free local Ollama model**
+  (`gemma4:e4b`, no API key, no signup — confirmed working live) with Claude
+  Haiku 4.5 as an optional paid override (`CODEGEN_PROVIDER=anthropic`).
 - `agent_builder/provider.py` + `requester.py` — the human-facing order plus
   the A2A leg that hires the Verifier.
 - All modules import cleanly and fail exactly at the expected point (missing
@@ -40,9 +42,20 @@ Built and locally verified without live CAP credentials:
 
 ```
 python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt
+.venv\Scripts\python.exe -m pip install -r requirements.txt
 docker build -t pairproof-sandbox ./sandbox
 copy .env.example .env   # then fill in real values
+```
+
+(Use `python -m pip`, not `pip.exe` directly — renaming this folder after venv
+creation breaks the `pip.exe` launcher's baked-in path; `python -m pip`
+doesn't have that problem.)
+
+Codegen defaults to a local Ollama model — no cost, no key. Make sure
+`ollama serve` is running and `OLLAMA_MODEL` (default `gemma4:e4b`) is pulled:
+
+```
+ollama pull gemma4:e4b
 ```
 
 Run each agent in its own terminal, with `.env` loaded:

@@ -1,6 +1,16 @@
-"""Wraps a single Claude API call that turns a task spec into a code+test
-bundle. Kept separate from the CAP provider/requester logic so it can be
-unit-tested (or swapped) without touching the negotiation/payment flow.
+"""Turns a task spec into a code+test bundle via an LLM call. Kept separate
+from the CAP provider/requester logic so it can be unit-tested (or swapped)
+without touching the negotiation/payment flow.
+
+Two providers, picked via CODEGEN_PROVIDER:
+
+- "ollama" (default): a locally-running Ollama model. Zero cost, no API key,
+  no signup -- this pipeline's whole point is that the Verifier independently
+  checks the output, so codegen quality doesn't need to be trusted, and a
+  free local model is the right default for that reason alone, not just cost.
+  Confirmed working live against gemma4:e4b on 2026-07-03.
+- "anthropic": Claude Haiku 4.5, for when you have an API key and want higher
+  quality. Requires ANTHROPIC_API_KEY.
 """
 
 from __future__ import annotations
@@ -8,7 +18,6 @@ from __future__ import annotations
 import json
 import os
 
-import anthropic
 from dotenv import load_dotenv
 
 # Safe to call even if common.config already did -- idempotent, and this
@@ -16,11 +25,9 @@ from dotenv import load_dotenv
 # depending on import order elsewhere.
 load_dotenv()
 
-# Haiku 4.5 by default: this pipeline's whole point is that the Verifier
-# independently checks the output, so codegen quality doesn't need to be
-# trusted -- the cheapest model that supports structured outputs is the
-# right default. Override with CODEGEN_MODEL if you want higher quality.
-MODEL = os.environ.get("CODEGEN_MODEL", "claude-haiku-4-5")
+CODEGEN_PROVIDER = os.environ.get("CODEGEN_PROVIDER", "ollama")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma4:e4b")
+ANTHROPIC_MODEL = os.environ.get("CODEGEN_MODEL", "claude-haiku-4-5")
 MAX_TOKENS = 3000
 
 SYSTEM_PROMPT = (
@@ -48,14 +55,32 @@ OUTPUT_SCHEMA = {
 }
 
 
-async def generate_code(task: str) -> dict[str, str]:
+async def _generate_ollama(task: str) -> dict[str, str]:
+    import ollama
+
+    client = ollama.AsyncClient()
+    response = await client.chat(
+        model=OLLAMA_MODEL,
+        messages=[
+            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": task},
+        ],
+        format=OUTPUT_SCHEMA,
+    )
+    payload = json.loads(response.message.content)
+    return payload["files"]
+
+
+async def _generate_anthropic(task: str) -> dict[str, str]:
+    import anthropic
+
     client = anthropic.AsyncAnthropic()
     # No `thinking`/`effort` here on purpose: Haiku 4.5 doesn't support the
     # effort parameter (400s), and this task is simple enough that thinking
     # wouldn't change the outcome -- the structured-output schema already
     # constrains the shape, and the Verifier catches actual mistakes.
     response = await client.messages.create(
-        model=MODEL,
+        model=ANTHROPIC_MODEL,
         max_tokens=MAX_TOKENS,
         system=SYSTEM_PROMPT,
         output_config={"format": {"type": "json_schema", "schema": OUTPUT_SCHEMA}},
@@ -64,3 +89,9 @@ async def generate_code(task: str) -> dict[str, str]:
     text = next(b.text for b in response.content if b.type == "text")
     payload = json.loads(text)
     return payload["files"]
+
+
+async def generate_code(task: str) -> dict[str, str]:
+    if CODEGEN_PROVIDER == "anthropic":
+        return await _generate_anthropic(task)
+    return await _generate_ollama(task)
