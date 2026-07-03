@@ -9,6 +9,12 @@ import json
 import os
 
 import anthropic
+from dotenv import load_dotenv
+
+# Safe to call even if common.config already did -- idempotent, and this
+# keeps codegen.py usable standalone (e.g. from a test script) without
+# depending on import order elsewhere.
+load_dotenv()
 
 # Haiku 4.5 by default: this pipeline's whole point is that the Verifier
 # independently checks the output, so codegen quality doesn't need to be

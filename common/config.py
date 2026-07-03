@@ -3,6 +3,13 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from dotenv import load_dotenv
+
+# Loaded once at import time so every entrypoint (agent_verifier.provider,
+# agent_builder.provider, ad-hoc test scripts) picks up .env automatically --
+# nobody has to `export` keys into the shell by hand.
+load_dotenv()
+
 
 @dataclass
 class AgentConfig:

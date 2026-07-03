@@ -1,5 +1,6 @@
 croo-sdk
 anthropic
+python-dotenv
 pytest
 ruff
 bandit
