@@ -1,4 +1,4 @@
-# Verified Build
+# PairProof
 
 Two-agent submission for the CROO Agent Hackathon (Developer Tooling + Open
 tracks). **Builder** takes a coding task, generates code+tests, then
@@ -41,7 +41,7 @@ Built and locally verified without live CAP credentials:
 ```
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
-docker build -t verified-build-sandbox ./sandbox
+docker build -t pairproof-sandbox ./sandbox
 copy .env.example .env   # then fill in real values
 ```
 

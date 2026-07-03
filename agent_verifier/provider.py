@@ -19,7 +19,7 @@ from common.config import AgentConfig
 
 logger = logging.getLogger("agent_verifier")
 
-SANDBOX_IMAGE = "verified-build-sandbox"
+SANDBOX_IMAGE = "pairproof-sandbox"
 DOCKER_TIMEOUT_SECONDS = 60
 PAYMENT_WAIT_SECONDS = 900  # give the requester time to see the order and pay
 

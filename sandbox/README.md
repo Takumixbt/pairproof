@@ -4,7 +4,7 @@ Executes an untrusted code+test bundle (LLM-generated, never trust it) and
 produces a JSON report. Build once:
 
 ```
-docker build -t verified-build-sandbox ./sandbox
+docker build -t pairproof-sandbox ./sandbox
 ```
 
 Run per verification (bundle JSON piped in on stdin, report JSON out on
@@ -15,7 +15,7 @@ docker run --rm -i \
   --network none \
   --memory 256m --cpus 0.5 --pids-limit 128 \
   --read-only --tmpfs /tmp \
-  verified-build-sandbox < bundle.json > report.json
+  pairproof-sandbox < bundle.json > report.json
 ```
 
 `agent_verifier/provider.py` shells out with exactly these flags. For local
