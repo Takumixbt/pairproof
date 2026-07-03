@@ -23,17 +23,17 @@ class AgentConfig:
 
     @classmethod
     def from_env(cls, prefix: str) -> "AgentConfig":
-        def require(name: str) -> str:
-            key = f"{prefix}_{name}"
+        def require(key: str) -> str:
             val = os.environ.get(key, "")
             if not val:
                 raise ValueError(f"missing required env var: {key}")
             return val
 
         return cls(
-            sdk_key=require("SDK_KEY"),
-            service_id=require("SERVICE_ID"),
-            base_url=require("API_URL"),
-            ws_url=require("WS_URL"),
+            sdk_key=require(f"{prefix}_SDK_KEY"),
+            service_id=require(f"{prefix}_SERVICE_ID"),
+            # Shared across both agents -- not per-prefix, per .env.example.
+            base_url=require("CROO_API_URL"),
+            ws_url=require("CROO_WS_URL"),
             rpc_url=os.environ.get("CROO_RPC_URL", ""),
         )
