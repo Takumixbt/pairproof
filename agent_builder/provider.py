@@ -1,0 +1,111 @@
+"""Builder agent: a CAP provider that takes a natural-language coding task from
+a human/agent requester, generates code+tests, then — before delivering —
+acts as a CAP requester itself and pays the Verifier agent to check the work.
+This is the human-facing half of the two-agent pipeline.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+
+from croo import DeliverableType, DeliverOrderRequest, EventType
+
+from common.cap_client import EventWaiter, make_client
+from common.config import AgentConfig
+
+from .codegen import generate_code
+from .requester import hire_verifier
+
+logger = logging.getLogger("agent_builder")
+
+PAYMENT_WAIT_SECONDS = 900
+
+
+def _parse_task(requirements: str) -> str:
+    task = requirements.strip()
+    if not task:
+        raise ValueError("empty task requirements")
+    return task
+
+
+async def _wait_for_payment(client, stream, order_id: str) -> bool:
+    waiter = EventWaiter(stream, EventType.ORDER_PAID, lambda e: e.order_id == order_id)
+    order = await client.get_order(order_id)
+    if order.status == "paid":
+        return True
+    try:
+        await waiter.wait(timeout=PAYMENT_WAIT_SECONDS)
+        return True
+    except asyncio.TimeoutError:
+        order = await client.get_order(order_id)
+        return order.status == "paid"
+
+
+async def handle_negotiation(client, stream, negotiation_id: str, verifier_service_id: str) -> None:
+    negotiation = await client.get_negotiation(negotiation_id)
+
+    try:
+        task = _parse_task(negotiation.requirements)
+    except Exception as e:
+        logger.warning("rejecting malformed negotiation %s: %s", negotiation_id, e)
+        await client.reject_negotiation(negotiation_id, f"malformed task: {e}")
+        return
+
+    accept_result = await client.accept_negotiation(negotiation_id)
+    order = accept_result.order
+    logger.info("accepted negotiation=%s order=%s", negotiation_id, order.order_id)
+
+    paid = await _wait_for_payment(client, stream, order.order_id)
+    if not paid:
+        logger.warning("order %s never paid within timeout, abandoning", order.order_id)
+        return
+
+    files = await generate_code(task)
+
+    try:
+        report = await hire_verifier(client, verifier_service_id, files)
+    except Exception as e:
+        logger.exception("verifier hire failed for order %s", order.order_id)
+        report = {"overall_pass": False, "verifier_error": str(e)}
+
+    bundle = {"files": files, "verification": report}
+    await client.deliver_order(
+        order.order_id,
+        DeliverOrderRequest(deliverable_type=DeliverableType.TEXT, deliverable_text=json.dumps(bundle)),
+    )
+    logger.info(
+        "delivered order=%s verifier_pass=%s", order.order_id, report.get("overall_pass")
+    )
+
+
+async def run(cfg: AgentConfig, verifier_service_id: str) -> None:
+    client = make_client(cfg)
+    stream = await client.connect_websocket()
+
+    def on_negotiation(event) -> None:
+        if event.service_id and event.service_id != cfg.service_id:
+            return
+        asyncio.create_task(
+            handle_negotiation(client, stream, event.negotiation_id, verifier_service_id)
+        )
+
+    stream.on(EventType.NEGOTIATION_CREATED, on_negotiation)
+    logger.info(
+        "builder agent listening (service_id=%s, verifier_service_id=%s)",
+        cfg.service_id, verifier_service_id,
+    )
+
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await stream.close()
+        await client.close()
+
+
+if __name__ == "__main__":
+    import os
+
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(run(AgentConfig.from_env("BUILDER"), os.environ["CROO_VERIFIER_SERVICE_ID"]))
