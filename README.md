@@ -1,42 +1,62 @@
 # PairProof
 
-Two-agent submission for the CROO Agent Hackathon (Developer Tooling + Open
-tracks). **Builder** takes a coding task, generates code+tests, then
-autonomously pays **Verifier** via CAP to independently run the code in a
-sandboxed Docker container before delivering the verified bundle to the
-original requester. Full design rationale: `C:\Users\Takum\.claude\plans\sunny-zooming-hearth.md`.
+Two autonomous agents that trade real money to keep each other honest.
+
+**Builder** takes a plain-English coding task, writes code + tests, then — before
+it will accept payment for that work — hires **Verifier** over CROO's Agent
+Protocol (CAP) to independently run the result in a locked-down sandbox.
+Neither agent trusts the other's word; only a signed, escrow-settled report.
+
+Submission for the **CROO Agent Hackathon** — Developer Tooling + Open tracks.
+
+## Why
+
+An LLM that writes code will hand you code that's confidently wrong, and
+there's no way to know without checking it yourself. PairProof makes that
+check structural instead of optional: the code-writing agent cannot get paid
+until it has already paid a second, independent agent to verify its own work.
+
+The verification isn't cosmetic. Asked for a password generator, Builder's
+codegen reaches for `random.choice` — it works, its own tests pass — and
+Verifier's sandbox flags it anyway, because `bandit` catches insecure
+randomness that no unit test would ever catch. That's the whole thesis, in
+one run.
+
+## How a task flows
+
+```
+  you                    Builder                  Verifier
+   |--- negotiate + pay ---->|                         |
+   |      (Order 1)          |--- negotiate + pay ---->|
+   |                         |      (Order 2)          |
+   |                         |                         |--- runs sandbox
+   |                         |<--- deliver + clear ----|    (pytest, ruff,
+   |<--- deliver + clear ----|      (Order 2)          |     bandit)
+   |      (Order 1)          |
+```
+
+Every arrow above is a real CAP order: negotiate → lock (escrow) → deliver
+(proof) → clear (settlement + reputation update). Order 2 is invisible to the
+original requester — it's Builder spending its own money to buy a second
+opinion before it'll stand behind its own work.
 
 ## Status
 
-Built and locally verified without live CAP credentials:
+Both agents are registered, funded, and live on the CROO Agent Store. The
+full loop has been confirmed end-to-end with real USDC settled on Base on
+both legs — human → Builder, and Builder → Verifier.
 
-- `sandbox/` — pytest+ruff+bandit verification harness. Unit-tested
-  (`tests/test_run_checks.py`) against known-good, logic-broken, and
-  insecure code samples — all three cases correctly detected.
+- `sandbox/` — the verification harness (pytest + ruff + bandit), unit-tested
+  in `tests/` against known-good, logic-broken, and insecure fixtures.
 - `agent_verifier/provider.py` — CAP provider: accepts a code+test bundle,
-  waits for payment, runs the Docker sandbox, delivers the report.
-- `agent_builder/codegen.py` — turns a task spec into a code+test bundle via
-  structured JSON output. Defaults to a **free local Ollama model**
-  (`gemma4:e4b`, no API key, no signup — confirmed working live) with Claude
-  Haiku 4.5 as an optional paid override (`CODEGEN_PROVIDER=anthropic`).
-- `agent_builder/provider.py` + `requester.py` — the human-facing order plus
-  the A2A leg that hires the Verifier.
-- All modules import cleanly and fail exactly at the expected point (missing
-  env var) when run without credentials — confirmed via `python -m
-  agent_verifier.provider` / `python -m agent_builder.provider`.
-
-**Not yet done** (needs you, not more code — see the plan's Phase 0):
-
-1. Register both agents + their services on the CROO dashboard → get
-   `*_SDK_KEY` / `*_SERVICE_ID` values.
-2. Fund each agent's on-chain wallet (shown on the dashboard after
-   registration) with a small amount of ETH (gas) + USDC (test payment).
-   The SDK authenticates via `X-SDK-Key` only — no private key is ever
-   generated or handled by this code.
-3. Confirm `CROO_API_URL` / `CROO_WS_URL` (not documented anywhere we could
-   find — pull from the dashboard).
-4. Fill in `.env` (copy `.env.example`) and run both agents.
-5. List both agents on the CROO Agent Store, record the demo, submit.
+  waits for payment, runs the Docker sandbox, delivers the signed report.
+- `agent_builder/codegen.py` — turns a task into a code+test bundle. Default
+  provider is Groq's free tier (fast, no cost); Ollama and Claude Haiku 4.5
+  are available as swap-in alternatives via `CODEGEN_PROVIDER`.
+- `agent_builder/provider.py` + `requester.py` — the human-facing order, and
+  the A2A leg that hires Verifier.
+- `scripts/smoke_test.py` — drives one task through the full pipeline as a
+  human requester would, end to end.
 
 ## Setup
 
@@ -44,25 +64,27 @@ Built and locally verified without live CAP credentials:
 python -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 docker build -t pairproof-sandbox ./sandbox
-copy .env.example .env   # then fill in real values
+copy .env.example .env   # fill in your own SDK keys / service IDs
 ```
 
-(Use `python -m pip`, not `pip.exe` directly — renaming this folder after venv
-creation breaks the `pip.exe` launcher's baked-in path; `python -m pip`
-doesn't have that problem.)
+Register each agent (Builder, Verifier, and a throwaway requester identity)
+at `agent.croo.network` to get its `*_SDK_KEY` / `*_SERVICE_ID`, and fund
+each agent's on-chain wallet with a small amount of USDC on Base — CROO's
+paymaster sponsors gas, but still needs the payer to hold some of the token
+it's sponsoring.
 
-Codegen defaults to a local Ollama model — no cost, no key. Make sure
-`ollama serve` is running and `OLLAMA_MODEL` (default `gemma4:e4b`) is pulled:
-
-```
-ollama pull gemma4:e4b
-```
-
-Run each agent in its own terminal, with `.env` loaded:
+Run each agent in its own terminal, or use `scripts/run_agents.ps1` /
+`stop_agents.ps1` to start and stop both as background processes:
 
 ```
 python -m agent_verifier.provider
 python -m agent_builder.provider
+```
+
+Then drive a real task through the pipeline:
+
+```
+python scripts/smoke_test.py "Write a function that generates a random alphanumeric password of a given length."
 ```
 
 ## Testing without spending real USDC
@@ -71,7 +93,7 @@ python -m agent_builder.provider
 .venv\Scripts\pytest tests -v
 ```
 
-This exercises `sandbox/run_checks.py` directly (no Docker, no CAP) against
-known-good/bad/insecure fixtures. It does **not** exercise the CAP
-negotiate/pay/deliver loop — that requires real credentials and, per CROO's
-docs, real USDC (no confirmed testnet/sandbox mode as of this writing).
+Exercises `sandbox/run_checks.py` directly against known-good, known-bad, and
+insecure fixtures — no Docker, no CAP, no cost. It doesn't exercise the
+negotiate/pay/deliver loop itself, which needs real credentials and real
+USDC (CROO has no testnet/sandbox mode as of this writing).
