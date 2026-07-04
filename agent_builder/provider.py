@@ -21,6 +21,23 @@ from .requester import hire_verifier
 logger = logging.getLogger("agent_builder")
 
 PAYMENT_WAIT_SECONDS = 900
+CODEGEN_ATTEMPTS = 3
+CODEGEN_RETRY_SECONDS = 3.0
+
+
+async def _generate_code_with_retries(task: str) -> dict[str, str] | None:
+    # Groq (and the CAP API itself) have shown transient connection hiccups
+    # in practice -- confirmed live 2026-07-04 -- and generate_code() used to
+    # be a single unguarded call, so one bad request would leave the order
+    # hanging for the buyer's full poll timeout with no feedback at all.
+    for attempt in range(1, CODEGEN_ATTEMPTS + 1):
+        try:
+            return await generate_code(task)
+        except Exception:
+            logger.exception("codegen attempt %d/%d failed", attempt, CODEGEN_ATTEMPTS)
+            if attempt < CODEGEN_ATTEMPTS:
+                await asyncio.sleep(CODEGEN_RETRY_SECONDS)
+    return None
 
 
 def _parse_task(requirements: str) -> str:
@@ -69,7 +86,16 @@ async def handle_negotiation(client, stream, negotiation_id: str, verifier_servi
         logger.warning("order %s never paid within timeout, abandoning", order.order_id)
         return
 
-    files = await generate_code(task)
+    files = await _generate_code_with_retries(task)
+    if files is None:
+        logger.error("codegen failed after %d attempts, delivering error bundle for order %s",
+                     CODEGEN_ATTEMPTS, order.order_id)
+        bundle = {"files": None, "verification": {"overall_pass": False, "codegen_error": "codegen unavailable"}}
+        await client.deliver_order(
+            order.order_id,
+            DeliverOrderRequest(deliverable_type=DeliverableType.TEXT, deliverable_text=json.dumps(bundle)),
+        )
+        return
 
     try:
         report = await hire_verifier(client, verifier_service_id, files)
