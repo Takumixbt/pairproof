@@ -24,10 +24,17 @@ PAYMENT_WAIT_SECONDS = 900
 
 
 def _parse_task(requirements: str) -> str:
-    task = requirements.strip()
-    if not task:
-        raise ValueError("empty task requirements")
-    return task
+    # CROO's API rejects non-JSON `requirements` even for services configured
+    # with requirements_type=Text (confirmed live 2026-07-04: bare text 400s
+    # with "requirements must be valid JSON") -- so a plain task description
+    # arrives JSON-encoded as a string literal, e.g. '"do the thing"'.
+    try:
+        payload = json.loads(requirements)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"requirements must be valid JSON: {e}") from e
+    if not isinstance(payload, str) or not payload.strip():
+        raise ValueError("requirements JSON must be a non-empty string")
+    return payload.strip()
 
 
 async def _wait_for_payment(client, stream, order_id: str) -> bool:

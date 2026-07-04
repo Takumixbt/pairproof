@@ -18,10 +18,10 @@ import json
 import os
 import sys
 
-from croo import ListOptions, NegotiateOrderRequest, NegotiationStatus, OrderStatus
+from croo import NegotiateOrderRequest, NegotiationStatus, OrderStatus
 from dotenv import load_dotenv
 
-from common.cap_client import make_client, poll_until
+from common.cap_client import find_order_by_negotiation, make_client, poll_until
 from common.config import AgentConfig
 
 load_dotenv()
@@ -45,7 +45,12 @@ async def main() -> None:
     print(f"Task: {task!r}")
     print(f"Negotiating with Builder service {builder_service_id}...")
     negotiation = await client.negotiate_order(
-        NegotiateOrderRequest(service_id=builder_service_id, requirements=task)
+        # requirements must be valid JSON even for a Text-type service --
+        # confirmed live: bare text 400s with "requirements must be valid
+        # JSON". A JSON string literal satisfies that and still round-trips
+        # to plain text on the Builder's side (see agent_builder/provider.py
+        # _parse_task).
+        NegotiateOrderRequest(service_id=builder_service_id, requirements=json.dumps(task))
     )
     print(f"  negotiation_id={negotiation.negotiation_id} status={negotiation.status}")
 
@@ -58,8 +63,7 @@ async def main() -> None:
         raise RuntimeError(f"Builder rejected the negotiation: {accepted.reject_reason}")
     print("Negotiation accepted.")
 
-    orders = await client.list_orders(ListOptions(role="requester"))
-    order = next(o for o in orders if o.negotiation_id == negotiation.negotiation_id)
+    order = await find_order_by_negotiation(client, negotiation.negotiation_id)
     print(f"Order created: {order.order_id} price={order.price} token={order.payment_token}")
 
     print("Paying order...")

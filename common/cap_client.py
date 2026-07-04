@@ -4,7 +4,7 @@ import asyncio
 import time
 from typing import Awaitable, Callable, TypeVar
 
-from croo import AgentClient, Config, Event, EventStream
+from croo import AgentClient, Config, Event, EventStream, ListOptions, Order
 
 from .config import AgentConfig
 
@@ -30,6 +30,23 @@ async def poll_until(
         if time.monotonic() >= deadline:
             raise TimeoutError("timed out waiting for condition")
         await asyncio.sleep(interval)
+
+
+async def find_order_by_negotiation(
+    client: AgentClient, negotiation_id: str, timeout: float = 60, interval: float = 2.0,
+) -> Order:
+    """list_orders() doesn't reliably include a just-accepted order right
+    away -- confirmed live 2026-07-04: the order exists (status "creating")
+    but a single immediate list_orders(role="buyer") call can still miss it.
+    Poll instead of a one-shot lookup.
+    """
+    async def _find() -> Order | None:
+        orders = await client.list_orders(ListOptions(role="buyer"))
+        return next((o for o in orders if o.negotiation_id == negotiation_id), None)
+
+    order = await poll_until(_find, lambda o: o is not None, timeout=timeout, interval=interval)
+    assert order is not None
+    return order
 
 
 def make_client(cfg: AgentConfig) -> AgentClient:

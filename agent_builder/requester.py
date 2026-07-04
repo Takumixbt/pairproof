@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import json
 
-from croo import ListOptions, NegotiateOrderRequest, NegotiationStatus, Order, OrderStatus
+from croo import NegotiateOrderRequest, NegotiationStatus, OrderStatus
 
-from common.cap_client import poll_until
+from common.cap_client import find_order_by_negotiation, poll_until
 
 DEFAULT_TIMEOUT_SECONDS = 600
 
@@ -40,12 +40,7 @@ async def hire_verifier(
             f"verifier rejected negotiation {negotiation.negotiation_id}: {accepted.reject_reason}"
         )
 
-    orders = await client.list_orders(ListOptions(role="requester"))
-    order: Order | None = next(
-        (o for o in orders if o.negotiation_id == negotiation.negotiation_id), None
-    )
-    if order is None:
-        raise RuntimeError(f"no order found for accepted negotiation {negotiation.negotiation_id}")
+    order = await find_order_by_negotiation(client, negotiation.negotiation_id, timeout=timeout)
 
     await client.pay_order(order.order_id)
 
