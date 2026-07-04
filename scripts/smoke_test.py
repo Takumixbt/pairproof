@@ -26,7 +26,13 @@ from common.config import AgentConfig
 
 load_dotenv()
 
-DEFAULT_TASK = "Write a function that checks whether a number is prime."
+DEFAULT_TASK = (
+    "Write a function is_valid_transition(current, next) that validates whether a "
+    "transition between two CAP order statuses is legal. The valid sequence is "
+    "CREATING -> CREATED -> PAID -> DELIVERING -> COMPLETED. From any status except "
+    "COMPLETED, a transition to REJECTED or EXPIRED is also always legal. No other "
+    "transitions are legal, including skipping steps or moving backwards."
+)
 
 
 async def main() -> None:
