@@ -4,7 +4,7 @@ import asyncio
 import time
 from typing import Awaitable, Callable, TypeVar
 
-from croo import AgentClient, Config, Event, EventStream, ListOptions, Order
+from croo import AgentClient, Config, Event, EventStream, ListOptions, Order, OrderStatus
 
 from .config import AgentConfig
 
@@ -39,6 +39,11 @@ async def find_order_by_negotiation(
     away -- confirmed live 2026-07-04: the order exists (status "creating")
     but a single immediate list_orders(role="buyer") call can still miss it.
     Poll instead of a one-shot lookup.
+
+    Also waits past the transient CREATING status: pay_order() 400s with
+    "order can only be paid when status is created" if called too early
+    (confirmed live 2026-07-04) -- provisioning the order is itself async on
+    the backend, so a freshly-found order can still say "creating".
     """
     async def _find() -> Order | None:
         orders = await client.list_orders(ListOptions(role="buyer"))
@@ -46,6 +51,16 @@ async def find_order_by_negotiation(
 
     order = await poll_until(_find, lambda o: o is not None, timeout=timeout, interval=interval)
     assert order is not None
+
+    if order.status == OrderStatus.CREATING:
+        order = await poll_until(
+            lambda: client.get_order(order.order_id),
+            lambda o: o.status != OrderStatus.CREATING,
+            timeout=timeout,
+            interval=interval,
+        )
+    if order.status != OrderStatus.CREATED:
+        raise RuntimeError(f"order {order.order_id} did not reach CREATED status: {order.status}")
     return order
 
 
