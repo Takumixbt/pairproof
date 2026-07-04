@@ -1,9 +1,10 @@
 croo-sdk
 ollama
+groq
 python-dotenv
 pytest
 ruff
 bandit
 
-# Only needed if CODEGEN_PROVIDER=anthropic (default is ollama, free/local)
+# Only needed if CODEGEN_PROVIDER=anthropic (default is groq, free tier)
 anthropic
