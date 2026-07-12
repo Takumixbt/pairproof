@@ -7,8 +7,6 @@ it will accept payment for that work — hires **Verifier** over CROO's Agent
 Protocol (CAP) to independently run the result in a locked-down sandbox.
 Neither agent trusts the other's word; only a signed, escrow-settled report.
 
-Submission for the **CROO Agent Hackathon** — Developer Tooling + Open tracks.
-
 ## Why
 
 An LLM that writes code will hand you code that's confidently wrong, and
